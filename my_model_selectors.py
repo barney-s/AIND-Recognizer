@@ -31,15 +31,23 @@ class ModelSelector(object):
     def select(self):
         raise NotImplementedError
 
-    def base_model(self, num_states):
+
+    def base_model(self, num_states, X=None, lens=None, testX=None, testlens=None):
         # with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=DeprecationWarning)
         # warnings.filterwarnings("ignore", category=RuntimeWarning)
+        if X is None:
+            X = self.X
+        if lens is None:
+            lens = self.lengths
         try:
             hmm_model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000,
-                                    random_state=self.random_state, verbose=False).fit(self.X, self.lengths)
+                                    random_state=self.random_state, verbose=False).fit(X, lens)
             if self.verbose:
                 print("model created for {} with {} states".format(self.this_word, num_states))
+
+            if testX is not None:
+                return hmm_model, hmm_model.score(testX, testlens)
             return hmm_model
         except:
             if self.verbose:
@@ -76,8 +84,20 @@ class SelectorBIC(ModelSelector):
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        logN = np.log(len(self.X))
+        least = float("inf")
+        for count in range(self.min_n_components, self.max_n_components+1):
+            model = self.base_model(num_states=count)
+            try:
+                logL = model.score(self.X, self.lengths)
+                p = model.n_features
+                bic = -2 * logL + p * logN
+                if bic < least:
+                    least = bic
+                    best = model
+            except:
+                pass
+        return best
 
 
 class SelectorDIC(ModelSelector):
@@ -91,9 +111,25 @@ class SelectorDIC(ModelSelector):
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        highest = float("-inf")
+        for count in range(self.min_n_components, self.max_n_components + 1):
+            dic = None
+            try:
+                model = self.base_model(num_states=count)
+                score = model.score(self.X, self.lengths)
+                score_sum = 0.0
+                for w, xl in self.hwords.items():
+                    x, l = xl[0], xl[1]
+                    if w != self.this_word:
+                        score_sum += model.score(x, l)
+                mean = score_sum/(len(self.hwords)-1)
+                dic = score - mean
+            except:
+                continue
+            if dic > highest:
+                best = model
+                highest = dic
+        return best
 
 
 class SelectorCV(ModelSelector):
@@ -103,6 +139,26 @@ class SelectorCV(ModelSelector):
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        highest = float("-inf")
+        best = self.n_constant
+        for count in range(self.min_n_components, self.max_n_components+1):
+            k = 3
+            if(len(self.sequences) < k):
+                break
+            split = KFold(n_splits=k, shuffle=False,
+                          random_state=self.random_state)
+            scores = []
+            for train, test in split.split(self.sequences):
+                trX, trLens = combine_sequences(train, self.sequences)
+                tsX, tsLens = combine_sequences(test, self.sequences)
+                try:
+                    _, score = self.base_model(count, X=trX, lens=trLens,
+                                               testX=tsX, testlens=tsLens)
+                    scores.append(score)
+                except:
+                    pass
+            avg = np.average(scores)
+            if avg > highest:
+                highest = avg
+                best = count
+        return self.base_model(best)
