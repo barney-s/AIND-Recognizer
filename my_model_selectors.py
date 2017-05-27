@@ -86,6 +86,7 @@ class SelectorBIC(ModelSelector):
 
         logN = np.log(len(self.X))
         least = float("inf")
+        best = None
         for count in range(self.min_n_components, self.max_n_components+1):
             model = self.base_model(num_states=count)
             try:
@@ -112,6 +113,7 @@ class SelectorDIC(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
         highest = float("-inf")
+        best = None
         for count in range(self.min_n_components, self.max_n_components + 1):
             dic = None
             try:
